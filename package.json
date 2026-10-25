@@ -10,24 +10,31 @@
         "lint": "oxlint --type-aware --type-check && bun run lint:fix",
         "lint:fix": "oxlint --fix",
         "format:check": "prettier --check .",
-        "format": "prettier --write . && bun run format:check"
+        "format": "prettier --write . && bun run format:check",
+        "test": "vitest run",
+        "test:watch": "vitest",
+        "coverage": "vitest run --coverage"
     },
     "devDependencies": {
         "@eslint/js": "^10.0.1",
         "@prettier/plugin-pug": "^3.6.0",
+        "@testing-library/dom": "^10.4.0",
         "@types/bun": "latest",
         "@types/pug": "^2.0.10",
+        "@vitest/coverage-v8": "^2.1.8",
         "chokidar": "^6.0.0",
         "eslint": "^10.13.0",
         "eslint-config-prettier": "^10.1.8",
         "globals": "^17.13.0",
+        "jsdom": "^25.0.1",
         "oxlint": "^1.89.0",
         "oxlint-tsgolint": "7",
         "prettier": "^3.9.10",
         "pug": "^3.0.4",
         "sass": "^1.106.1",
         "typescript": "^7.0.2",
-        "typescript-eslint": "^8.72.0"
+        "typescript-eslint": "^8.72.0",
+        "vitest": "^2.1.8"
     },
     "peerDependencies": {
         "typescript": "^7"

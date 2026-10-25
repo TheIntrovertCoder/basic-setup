@@ -3,6 +3,7 @@ import * as sass from 'sass'
 import chokidar from 'chokidar'
 
 const PORT = 3000
+
 const HMR_CLIENT = `<script>
 (() => {
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -25,91 +26,118 @@ const HMR_CLIENT = `<script>
 })()
 </script>`
 
-const server = Bun.serve({
-    port: PORT,
+export async function serveHtml(): Promise<Response> {
+    const src = Bun.file('src/index.pug')
+    const pug = await src.text()
+    const page = render(pug, { pretty: true })
+    const html = page.includes('</body>')
+        ? page.replace('</body>', `${HMR_CLIENT}</body>`)
+        : page + HMR_CLIENT
 
-    fetch(req, server) {
-        const url = new URL(req.url)
-
-        if (url.pathname === '/__hmr') {
-            if (server.upgrade(req)) return
-            return new Response('WebSocket upgrade failed', { status: 400 })
+    return new Response(html, {
+        headers: {
+            'Content-Type': 'text/html',
+            'Cache-Control': 'no-store'
         }
+    })
+}
 
-        if (url.pathname === '/' || url.pathname === '/index.html') {
-            const src = Bun.file('src/index.pug')
-            return src.text().then((pug) => {
-                const page = render(pug, { pretty: true })
-                const html = page.includes('</body>')
-                    ? page.replace('</body>', `${HMR_CLIENT}</body>`)
-                    : page + HMR_CLIENT
-
-                return new Response(html, {
-                    headers: {
-                        'Content-Type': 'text/html',
-                        'Cache-Control': 'no-store'
-                    }
-                })
-            })
+export async function serveCss(): Promise<Response> {
+    const result = sass.compile('src/styles/main.sass')
+    return new Response(result.css, {
+        headers: {
+            'Content-Type': 'text/css',
+            'Cache-Control': 'no-store'
         }
+    })
+}
 
-        if (url.pathname === '/dist/main.css') {
-            const result = sass.compile('src/styles/main.sass')
-            return new Response(result.css, {
-                headers: {
-                    'Content-Type': 'text/css',
-                    'Cache-Control': 'no-store'
-                }
-            })
-        }
+export async function serveJs(): Promise<Response> {
+    const built = await Bun.build({
+        entrypoints: ['src/scripts/main.ts'],
+        format: 'iife',
+        naming: '[dir]/[name].[ext]'
+    })
 
-        if (url.pathname === '/dist/main.js') {
-            return Bun.build({
-                entrypoints: ['src/scripts/main.ts'],
-                format: 'iife',
-                naming: '[dir]/[name].[ext]'
-            }).then((built) => {
-                if (!built.success || !built.outputs[0]) {
-                    return new Response(
-                        built.logs.map((log) => log.message).join('\n'),
-                        {
-                            status: 500,
-                            headers: {
-                                'Content-Type': 'text/plain',
-                                'Cache-Control': 'no-store'
-                            }
-                        }
-                    )
-                }
-
-                return new Response(built.outputs[0], {
-                    headers: {
-                        'Content-Type': 'text/javascript',
-                        'Cache-Control': 'no-store'
-                    }
-                })
-            })
-        }
-
-        return new Response('Not Found', { status: 404 })
-    },
-
-    websocket: {
-        open(ws) {
-            ws.subscribe('hmr')
-        }
+    if (!built.success || !built.outputs[0]) {
+        return new Response(built.logs.map((log) => log.message).join('\n'), {
+            status: 500,
+            headers: {
+                'Content-Type': 'text/plain',
+                'Cache-Control': 'no-store'
+            }
+        })
     }
-})
 
-chokidar
-    .watch(['src/index.pug', 'src/styles', 'src/scripts'], {
-        ignoreInitial: true,
-        awaitWriteFinish: { stabilityThreshold: 100 }
+    return new Response(built.outputs[0], {
+        headers: {
+            'Content-Type': 'text/javascript',
+            'Cache-Control': 'no-store'
+        }
     })
-    .on('all', (_event, path) => {
-        const message = /\.(sass|scss)$/.test(path) ? 'css' : 'reload'
-        server.publish('hmr', message)
-        console.info(`HMR: ${path}`)
+}
+
+function handleHmrUpgrade(
+    req: Request,
+    server: ReturnType<typeof Bun.serve>
+): Response | null {
+    const url = new URL(req.url)
+    if (url.pathname === '/__hmr') {
+        if (server.upgrade(req, { data: undefined })) return null
+        return new Response('WebSocket upgrade failed', { status: 400 })
+    }
+    return null
+}
+
+function createServer() {
+    const server = Bun.serve({
+        port: PORT,
+
+        fetch(req, server) {
+            const upgradeResponse = handleHmrUpgrade(req, server)
+            if (upgradeResponse) return upgradeResponse
+
+            const url = new URL(req.url)
+
+            if (url.pathname === '/' || url.pathname === '/index.html') {
+                return serveHtml()
+            }
+
+            if (url.pathname === '/dist/main.css') {
+                return serveCss()
+            }
+
+            if (url.pathname === '/dist/main.js') {
+                return serveJs()
+            }
+
+            return new Response('Not Found', { status: 404 })
+        },
+
+        websocket: {
+            open(ws) {
+                ws.subscribe('hmr')
+            }
+        }
     })
 
-console.info(`Live server - http://localhost:${PORT}`)
+    chokidar
+        .watch(['src/index.pug', 'src/styles', 'src/scripts'], {
+            ignoreInitial: true,
+            awaitWriteFinish: { stabilityThreshold: 100 }
+        })
+        .on('all', (_event, path) => {
+            const message = /\.(sass|scss)$/.test(path) ? 'css' : 'reload'
+            server.publish('hmr', message)
+            console.info(`HMR: ${path}`)
+        })
+
+    console.info(`Live server - http://localhost:${PORT}`)
+    return server
+}
+
+if (import.meta.main) {
+    createServer()
+}
+
+export { createServer }

@@ -1,0 +1,21 @@
+{
+    "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
+    "entry": ["src/scripts/main.ts", "dev.ts", "build.ts"],
+    "boundaries": {
+        "zones": [
+            { "name": "build", "globs": ["build.ts"] },
+            { "name": "dev-server", "globs": ["dev.ts"] },
+            { "name": "app", "globs": ["src/**"] }
+        ],
+        "rules": [{ "from": "app", "disallow": ["build", "dev-server"] }]
+    },
+    "typeAware": {
+        "enabled": true
+    },
+    "health": {
+        "maxCyclomatic": 20,
+        "maxCognitive": 15,
+        "maxCrap": 30,
+        "maxUnitSize": 60
+    }
+}
