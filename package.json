@@ -17,6 +17,7 @@
         "@prettier/plugin-pug": "^3.6.0",
         "@types/bun": "latest",
         "@types/pug": "^2.0.10",
+        "chokidar": "^6.0.0",
         "eslint": "^10.13.0",
         "eslint-config-prettier": "^10.1.8",
         "globals": "^17.13.0",

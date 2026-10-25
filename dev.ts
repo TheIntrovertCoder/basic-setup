@@ -1,55 +1,115 @@
 import { render } from 'pug'
 import * as sass from 'sass'
+import chokidar from 'chokidar'
 
 const PORT = 3000
+const HMR_CLIENT = `<script>
+(() => {
+    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const ws = new WebSocket(protocol + '//' + location.host + '/__hmr')
 
-Bun.serve({
+    ws.addEventListener('message', ({ data }) => {
+        if (data === 'css') {
+            document.querySelectorAll('link[rel="stylesheet"]').forEach((link) => {
+                const url = new URL(link.href)
+
+                if (url.pathname === '/dist/main.css') {
+                    url.searchParams.set('hmr', Date.now().toString())
+                    link.href = url.toString()
+                }
+            })
+        } else if (data === 'reload') {
+            location.reload()
+        }
+    })
+})()
+</script>`
+
+const server = Bun.serve({
     port: PORT,
-    async fetch(req) {
-        const path = new URL(req.url).pathname
 
-        // html
-        if (path === '/' || path === '/index.html') {
-            const src = await Bun.file('src/index.pug').text()
-            const html = render(src, { pretty: true })
-            return new Response(html, {
-                headers: { 'Content-Type': 'text/html' }
+    fetch(req, server) {
+        const url = new URL(req.url)
+
+        if (url.pathname === '/__hmr') {
+            if (server.upgrade(req)) return
+            return new Response('WebSocket upgrade failed', { status: 400 })
+        }
+
+        if (url.pathname === '/' || url.pathname === '/index.html') {
+            const src = Bun.file('src/index.pug')
+            return src.text().then((pug) => {
+                const page = render(pug, { pretty: true })
+                const html = page.includes('</body>')
+                    ? page.replace('</body>', `${HMR_CLIENT}</body>`)
+                    : page + HMR_CLIENT
+
+                return new Response(html, {
+                    headers: {
+                        'Content-Type': 'text/html',
+                        'Cache-Control': 'no-store'
+                    }
+                })
             })
         }
 
-        // css
-        if (path === '/dist/main.css') {
+        if (url.pathname === '/dist/main.css') {
             const result = sass.compile('src/styles/main.sass')
             return new Response(result.css, {
                 headers: {
-                    'Content-Type': 'text/css'
+                    'Content-Type': 'text/css',
+                    'Cache-Control': 'no-store'
                 }
             })
         }
 
-        // js
-        if (path === '/dist/main.js') {
-            const built = await Bun.build({
+        if (url.pathname === '/dist/main.js') {
+            return Bun.build({
                 entrypoints: ['src/scripts/main.ts'],
                 format: 'iife',
                 naming: '[dir]/[name].[ext]'
-            })
+            }).then((built) => {
+                if (!built.success || !built.outputs[0]) {
+                    return new Response(
+                        built.logs.map((log) => log.message).join('\n'),
+                        {
+                            status: 500,
+                            headers: {
+                                'Content-Type': 'text/plain',
+                                'Cache-Control': 'no-store'
+                            }
+                        }
+                    )
+                }
 
-            if (!built.success || !built.outputs[0]) {
-                return new Response(
-                    built.logs.map((l) => l.message).join('\n'),
-                    {
-                        status: 500,
-                        headers: { 'Content-Type': 'text/plain' }
+                return new Response(built.outputs[0], {
+                    headers: {
+                        'Content-Type': 'text/javascript',
+                        'Cache-Control': 'no-store'
                     }
-                )
-            }
-
-            return new Response(built.outputs[0]!)
+                })
+            })
         }
 
         return new Response('Not Found', { status: 404 })
+    },
+
+    websocket: {
+        open(ws) {
+            ws.subscribe('hmr')
+        }
     }
 })
+
+chokidar
+    .watch(['src/index.pug', 'src/styles', 'src/scripts'], {
+        ignoreInitial: true,
+        awaitWriteFinish: { stabilityThreshold: 100 }
+    })
+    .on('all', (_event, path) => {
+        const message = /\.(sass|scss)$/.test(path) ? 'css' : 'reload'
+        server.publish('hmr', message)
+        console.info(`HMR: ${path}`)
+    })
 
 console.info(`Live server - http://localhost:${PORT}`)
